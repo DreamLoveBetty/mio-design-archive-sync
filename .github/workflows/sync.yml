@@ -1,4 +1,4 @@
-name: Sync Mio Design Archive to Google Drive
+name: Sync Mio Design Archive to GitHub
 
 on:
   schedule:
@@ -7,15 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       force_update:
-        description: "Force re-download and re-upload all files"
+        description: "Force re-download all images"
         required: false
         type: boolean
         default: false
-      dry_run:
-        description: "Run rclone with --dry-run without modifying Google Drive"
-        required: false
-        type: boolean
-        default: false
+
+permissions:
+  contents: write
 
 concurrency:
   group: mio-design-archive-sync
@@ -29,46 +27,32 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install rclone
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rclone
-          rclone version
-
-      - name: Configure rclone
-        env:
-          RCLONE_CONFIG_CONTENT: ${{ secrets.RCLONE_CONFIG }}
-        run: |
-          if [ -z "$RCLONE_CONFIG_CONTENT" ]; then
-            echo "::error::Missing repository secret RCLONE_CONFIG. See README.md for setup instructions."
-            exit 1
-          fi
-          umask 077
-          mkdir -p "$HOME/.config/rclone"
-          printf '%s\n' "$RCLONE_CONFIG_CONTENT" > "$HOME/.config/rclone/rclone.conf"
-          chmod 600 "$HOME/.config/rclone/rclone.conf"
-
       - name: Run incremental archive sync
         env:
-          RCLONE_REMOTE: ${{ vars.RCLONE_REMOTE || 'gdrive:Mio-Design-Archive' }}
           FORCE_UPDATE: ${{ inputs.force_update || 'false' }}
-          DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: |
-          args=(--backend rclone --rclone-remote "$RCLONE_REMOTE")
+          args=()
           if [ "$FORCE_UPDATE" = "true" ]; then
             args+=(--force-update)
           fi
-          if [ "$DRY_RUN" = "true" ]; then
-            args+=(--dry-run)
-          fi
           python3 sync.py "${args[@]}"
 
-      - name: Clean up rclone config
-        if: always()
-        run: rm -f "$HOME/.config/rclone/rclone.conf"
+      - name: Commit and push archive updates
+        run: |
+          if [ -z "$(git status --porcelain archive/)" ]; then
+            echo "No changes under archive/ to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A archive/
+          git commit -m "chore(archive): sync Mio Design Archive ($(date -u +%Y-%m-%d))"
+          git push

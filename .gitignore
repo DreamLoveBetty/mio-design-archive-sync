@@ -1,5 +1,4 @@
-mirror/
-.sync_state.json
 __pycache__/
 .DS_Store
 *.log
+*.tmp
